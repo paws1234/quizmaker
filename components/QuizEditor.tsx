@@ -6,6 +6,7 @@ import { GqlError, gql, readSession, signOut } from '@/lib/gql';
 import { ADMIN_QUIZ, DELETE_QUIZ, UPDATE_QUIZ } from '@/lib/queries';
 import type { AdminQuiz, AdminQuestion, QuizSettings, UpdateQuizInput } from '@/lib/types';
 import AdminGate from './AdminGate';
+import ConfirmDialog from './ConfirmDialog';
 import ShareBox from './ShareBox';
 import StatsCard from './StatsCard';
 
@@ -26,6 +27,8 @@ export default function QuizEditor({ id }: { id: string }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -108,15 +111,18 @@ export default function QuizEditor({ id }: { id: string }) {
     }
   }
 
+    /** Only ever called from the confirmation dialog, not from a browser popup. */
   async function remove() {
-    if (!quiz) return;
-    if (!window.confirm(`Delete "${quiz.title}"? This cannot be undone.`)) return;
+      if (!quiz || deleting) return;
+      setDeleting(true);
 
     try {
       await gql<{ adminDeleteQuiz: boolean }>(DELETE_QUIZ, { id: quiz.id });
       router.push('/builder');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not delete the quiz.');
+        setDeleting(false);
+        setConfirmingDelete(false);
     }
   }
 
@@ -256,10 +262,29 @@ export default function QuizEditor({ id }: { id: string }) {
           <section className="card">
             <h2>Danger zone</h2>
             <p className="muted small">Deleting a quiz removes its questions, share link and analytics.</p>
-            <button className="btn btn--danger" onClick={() => void remove()}>
+                      <button
+                          className="btn btn--danger"
+                          onClick={() => setConfirmingDelete(true)}
+                          disabled={deleting}
+                      >
               Delete this quiz
             </button>
           </section>
+
+                  <ConfirmDialog
+                      open={confirmingDelete}
+                      title="Delete this quiz?"
+                      confirmLabel="Delete quiz"
+                      danger
+                      busy={deleting}
+                      onCancel={() => setConfirmingDelete(false)}
+                      onConfirm={() => void remove()}
+                  >
+                      <p>
+                          &ldquo;{quiz.title}&rdquo; and its questions, share link and analytics will be removed. This
+                          cannot be undone.
+                      </p>
+                  </ConfirmDialog>
         </main>
 
         <aside className="editor__side">
