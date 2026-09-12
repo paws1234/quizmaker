@@ -24,7 +24,8 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: 0.0.0.0
-      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-quiz}:${MONGO_ROOT_PASSWORD:-quiz}@mongo:27017/${MONGO_DB:-quiz}?authSource=admin
+      # MONGODB_URI is inherited from docker-compose.yml, which honours a value
+      # set in .env before falling back to the mongo service.
       # Fails fast instead of silently shipping the dev token.
       ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env before a production run}
     ports: !override

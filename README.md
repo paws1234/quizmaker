@@ -177,6 +177,7 @@ scripts/seed.mjs              demo quiz
 Dockerfile                    dev / build / runner targets
 docker-compose.yml            dev stack (default)
 docker-compose.prod.yml       production overlay
+docker-compose.external-db.yml  use a hosted MongoDB instead of the container
 ```
 
 ## Development workflow
@@ -234,18 +235,100 @@ different uid than the dependency volume it is handed.
 
 ### Backups
 
-```bash
-# dump
-docker compose exec -T mongo sh -c 'mongodump --archive --gzip --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' > quizzes-$(date +%F).archive.gz
+Scope the dump to the application database. A plain `mongodump` also captures `admin.system.users`,
+and restoring that into a hosted cluster replaces its user accounts with your local ones — you are
+locked out of the cluster you were moving to, mid-restore.
 
-# restore
+```bash
+# dump (application database only)
+docker compose exec -T mongo sh -c 'mongodump --db "$MONGO_INITDB_DATABASE" --archive --gzip --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' > quizzes-$(date +%F).archive.gz
+
+# restore into the local container
 docker compose exec -T mongo sh -c 'mongorestore --archive --gzip --drop --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' < quizzes-2026-09-12.archive.gz
+
+# restore into a hosted cluster (the mongo image has the tools; it needs a route to the cluster)
+docker run --rm -i mongo:7 mongorestore \
+  --uri "mongodb+srv://user:password@cluster0.abcde.mongodb.net/quiz" \
+  --archive --gzip --drop < quizzes-2026-09-12.archive.gz
 ```
 
-### Using MongoDB Atlas instead
+`$MONGO_INITDB_DATABASE` is set inside the mongo container and names the application database
+(`quiz` unless you changed `MONGO_DB`).
 
-Nothing in the app cares where MongoDB runs. Point `MONGODB_URI` at Atlas (keep `authSource` in
-mind) in both compose files and drop the `mongo` service.
+### Using a hosted MongoDB
+
+The database does not have to live in Docker: Atlas, another managed provider or a server of your
+own all work, as long as the app can reach it over the network.
+
+1. **Create the cluster and a database user.** On Atlas that is a free cluster plus
+   *Database Access → Add New Database User*. Copy the password now; Atlas will not show it again.
+
+2. **Allow the connection.** Atlas → *Network Access* → add the public IP of the machine running
+   Docker (`curl -s ifconfig.me`). `0.0.0.0/0` means “anyone”, so use it only while testing.
+
+3. **Copy the connection string** (Atlas → *Connect* → *Drivers*):
+
+   ```
+   mongodb+srv://quizuser:<password>@cluster0.abcde.mongodb.net/quiz?retryWrites=true&w=majority
+   ```
+
+   Keep the `/quiz` part — that is the database name. Without it everything lands in a database
+   called `test`. If the password contains `@ : / ? # %`, percent-encode it (`@` → `%40`,
+   `:` → `%3A`); Atlas-generated passwords usually need this.
+
+4. **Put it in `.env`** (git-ignored, never committed):
+
+   ```
+   MONGODB_URI=mongodb+srv://quizuser:p%40ss%3Aw0rd@cluster0.abcde.mongodb.net/quiz?retryWrites=true&w=majority
+   ```
+
+   `MONGODB_URI` takes priority over the locally built URI in every mode. Leave it unset and the
+   stack keeps using its own container.
+
+5. **Start the app without the local database:**
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.external-db.yml up -d --build web
+   ```
+
+   Only `web` is named, so the `mongo` service is never created. Stopping is just
+   `docker compose down` — the plain file is enough, whichever mode you started in.
+
+6. **Check which database you are actually on:**
+
+   ```bash
+   curl -s localhost:3000/api/health
+   # {"ok":true,"database":"up","host":"cluster0-shard-00-02.abcde.mongodb.net","db":"quiz"}
+   ```
+
+   `host` and `db` are reported outside production, so a stale line in `.env` is obvious at a
+   glance. If it says `database: down`, the response carries the driver's error — a wrong password,
+   an IP missing from the allowlist, or a DNS failure are the usual causes.
+
+7. **Move existing quizzes across** with the backup commands above, restoring into the cluster.
+
+Production with a hosted database is the same plus the production overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.external-db.yml up -d --build web
+```
+
+Worth knowing:
+
+- `mongodb+srv://` needs SRV DNS lookups. Those work from inside the container on this machine
+  (checked against a public SRV record), but if your resolver blocks them the driver fails with
+  `querySrv ENOTFOUND`; Atlas also offers a standard `mongodb://host1,host2,host3/...` string that
+  avoids SRV entirely.
+- `+srv` is for clusters, not for anything local. It is a DNS *seed list*, so the host has to
+  publish `_mongodb._tcp.<host>` SRV records — and a single-node container on the compose network
+  publishes none, which is why `mongodb+srv://…@mongo/…` fails immediately with
+  `querySrv ENOTFOUND _mongodb._tcp.mongo`. Keep the built-in `mongodb://…@mongo:27017/…` for local
+  work and use the `+srv` form only where a provider hands you one (or where you publish the
+  records yourself for a self-hosted replica set).
+- With the local container out of the picture, `MONGO_ROOT_*` in `.env` are unused, and
+  `MONGODB_URI` plus `ADMIN_TOKEN` are the only secrets that matter.
+- Switching back is nothing more than clearing `MONGODB_URI` and running `docker compose up -d
+  --build` again; the `mongo-data` volume is untouched in the meantime.
 
 ---
 

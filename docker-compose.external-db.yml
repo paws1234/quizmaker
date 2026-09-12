@@ -1,0 +1,21 @@
+# Hosted-database overlay: use a real MongoDB (Atlas, another managed provider,
+# or a server you run yourself) instead of the mongo container.
+#
+#   # 1. put the connection string in .env (git-ignored):
+#   #    MONGODB_URI=mongodb+srv://user:password@cluster0.abcde.mongodb.net/quiz
+#   # 2. start only the app:
+#   docker compose -f docker-compose.yml -f docker-compose.external-db.yml up -d --build web
+#
+# `web` is named on the command line and its dependency on the local mongo
+# service is dropped below, so that container is never started. The data volume
+# is left untouched, so switching back is just the normal `docker compose up`.
+name: quize
+
+services:
+  web:
+    # Nothing local to wait for; the database is somewhere else.
+    depends_on: !reset null
+    environment:
+      # Required here: a missing value would otherwise fall back to the local
+      # mongo service that this mode exists to avoid.
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env, e.g. mongodb+srv://user:password@cluster0.abcde.mongodb.net/quiz}

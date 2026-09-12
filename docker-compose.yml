@@ -14,6 +14,11 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-quiz}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-quiz}
+      # Becomes the default database for tools run inside this container, and
+      # gives the backup commands below a name to scope mongodump to. Without
+      # it, a dump would include admin.system.users and restoring that into a
+      # hosted cluster overwrites its user accounts.
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-quiz}
     volumes:
       - mongo-data:/data/db
     ports:
@@ -49,8 +54,10 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: development
-      # Built from the same variables mongo uses, so the two can never drift.
-      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-quiz}:${MONGO_ROOT_PASSWORD:-quiz}@mongo:27017/${MONGO_DB:-quiz}?authSource=admin
+      # Set MONGODB_URI in .env to use a hosted database (see README, "Using a
+      # hosted MongoDB"); otherwise this is built from the variables the mongo
+      # service below uses, so the two can never drift.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://${MONGO_ROOT_USER:-quiz}:${MONGO_ROOT_PASSWORD:-quiz}@mongo:27017/${MONGO_DB:-quiz}?authSource=admin}
       # Token that unlocks the builder. Change it in .env before exposing this.
       ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
     command: sh -c "npm install --no-audit --no-fund && npm run dev"
