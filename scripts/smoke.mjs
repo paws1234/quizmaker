@@ -102,11 +102,21 @@ async function main() {
   check('web + database healthy', health?.ok === true, JSON.stringify(health));
 
   // --- authorisation ------------------------------------------------------
-  const anonymous = await gql(CREATE, { input: { title: 'nope' } });
-  check('create without a token is refused', codeOf(anonymous) === 'UNAUTHENTICATED', codeOf(anonymous) ?? '');
+    // The target decides the mode. With BUILDER_OPEN=true the session endpoint
+    // reports an admin session to anonymous callers, so asserting a refusal would
+    // be wrong. Ask the site which mode it is in rather than assuming.
+    const session = await fetch(`${BASE}/api/admin/session`).then((response) => response.json()).catch(() => ({}));
+    const anonymousIsAdmin = session?.authenticated === true;
 
-  if (!ADMIN_TOKEN) {
-    console.log('\nADMIN_TOKEN not set in the environment; stopping after auth checks.');
+    if (anonymousIsAdmin) {
+        check('builder is deliberately open (BUILDER_OPEN): anonymous admin access is allowed', true);
+    } else {
+      const anonymous = await gql(CREATE, { input: { title: 'nope' } });
+      check('create without a token is refused', codeOf(anonymous) === 'UNAUTHENTICATED', codeOf(anonymous) ?? '');
+  }
+
+    if (!anonymousIsAdmin && !ADMIN_TOKEN) {
+        console.log('\nADMIN_TOKEN is not set and the builder is not open; stopping after the auth checks.');
     return;
   }
 

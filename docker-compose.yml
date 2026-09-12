@@ -60,6 +60,9 @@ services:
       MONGODB_URI: ${MONGODB_URI:-mongodb://${MONGO_ROOT_USER:-quiz}:${MONGO_ROOT_PASSWORD:-quiz}@mongo:27017/${MONGO_DB:-quiz}?authSource=admin}
       # Token that unlocks the builder. Change it in .env before exposing this.
       ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
+      # BUILDER_OPEN=true removes the builder's token check entirely. Showcase
+      # deployments only: anyone who finds /builder can edit every quiz.
+      BUILDER_OPEN: ${BUILDER_OPEN:-false}
     command: sh -c "npm install --no-audit --no-fund && npm run dev"
     ports:
       - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"

@@ -14,3 +14,5 @@ yarn-error.log*
 next-env.d.ts.bak
 
 .DS_Store
+.vercel
+.env*

@@ -44,6 +44,8 @@ CMD ["npm", "run", "dev"]
 # ------------------------------------------------------------ production build
 FROM base AS build
 ENV NODE_ENV=production
+# The runner stage serves .next/standalone; nothing else should build that way.
+ENV NEXT_STANDALONE=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

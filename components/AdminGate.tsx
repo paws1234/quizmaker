@@ -33,14 +33,16 @@ export default function AdminGate({
     <div className="gate">
       <h1>Builder</h1>
       <p className="muted">
-        Quizzes are created and edited here. Enter the admin token that is set in <code>.env</code> as{' '}
-        <code>ADMIN_TOKEN</code>.
+              Quizzes are created and edited here. Access is one shared admin token (<code>ADMIN_TOKEN</code>) —
+              locally it is the value in <code>.env</code>, on a hosted deployment it is set in the project's
+              environment variables. Enter it once: this browser then stays signed in for 30 days.
       </p>
 
       {!configured && (
         <div className="notice notice--bad" role="alert">
-          The server has no <code>ADMIN_TOKEN</code> configured, so the builder stays locked. Add one to{' '}
-          <code>.env</code> and restart the stack.
+                  This deployment has no <code>ADMIN_TOKEN</code> configured, so the builder is locked. Set it in the
+                  project's environment variables (or in <code>.env</code> when running locally) and redeploy. A
+                  preview deployment that has no variables of its own shows this too — use the production URL.
         </div>
       )}
 

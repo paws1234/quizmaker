@@ -1,0 +1,27 @@
+# Files a CLI deploy must never upload.
+#
+# `vercel deploy` uploads the local directory rather than the git tree, so this
+# lists what has to stay out of it regardless of .gitignore. The Git integration
+# (importing the repo in the dashboard) never sees these files anyway, because
+# they are not committed.
+#
+# Local secrets: the connection string and the builder token live only in the
+# Vercel project's environment variables.
+.env
+.env.local
+.env.*.local
+
+# Rebuilt on the platform.
+node_modules
+.next
+
+# Local infrastructure, not part of a platform build.
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.prod.yml
+docker-compose.external-db.yml
+
+# Tests that talk to a running stack.
+scripts/smoke.mjs
+scripts/seed.mjs

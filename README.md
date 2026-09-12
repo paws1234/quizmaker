@@ -65,9 +65,22 @@ ADMIN_TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2) node scripts/seed.mjs
 Named volumes: `mongo-data` (the quizzes), `web_node_modules` and `web_next` (dependencies and
 build output, kept out of your working tree).
 
-Docker creates empty `node_modules/` and `.next/` directories as mount points the first time you
-start the stack. They stay empty — the installed packages and the build output live in the volumes
-— and both are git-ignored, so leave them alone rather than running `npm install` on the host.
+Docker creates `node_modules/` and `.next/` in the project root as mount points the first time you
+start the stack; the container's volumes are mounted over them, so their contents are irrelevant to
+the running app. Both are git-ignored and kept out of the build context.
+
+Two consequences worth knowing:
+
+- **Deleting either one while the stack is running breaks the container.** The volume sits on that
+  exact path, and removing the directory on the host detaches it: the dev server then fails with
+  `ENOENT ... /app/.next/routes-manifest.json` and every request returns 500, while
+  `docker compose ps` still reports "healthy" for a few minutes (the healthcheck needs several
+  consecutive failures before it flips). Stop the stack first, or recreate the container after:
+  `docker compose up -d --force-recreate web`.
+- **Installing dependencies on the host is optional and harmless.** `npm ci` in the project root
+  gives your editor real types and IntelliSense (roughly 200 MB); the container keeps using its own
+  volume either way, and the two cannot drift because both resolve from `package-lock.json`. Do not
+  run `npm run dev` on the host — it has no `MONGODB_URI` and will say so.
 
 Both published ports bind to `127.0.0.1` only. Change `WEB_BIND` / `MONGO_BIND` if you need
 them reachable from elsewhere — but read [Security](#security) first.
@@ -201,13 +214,18 @@ docker compose up -d --build
 Checks:
 
 ```bash
-docker compose run --rm --no-deps -T web npm run typecheck        # types
-docker compose run --rm --no-deps -T web npm run build            # production build
+docker compose run --rm --no-deps -T web npm run typecheck                     # types
+docker compose run --rm --no-deps -T -e NODE_ENV=production web npm run build   # build
 ADMIN_TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2) node scripts/smoke.mjs
 ```
 
-`npm run typecheck` alone does **not** catch route-handler signature problems that only appear in
-a production build, so run `npm run build` (or the prod stack) before shipping.
+Two things those flags are doing:
+
+- `npm run typecheck` alone does **not** catch route-handler signature problems that only appear in
+  a production build, so run `npm run build` before shipping.
+- `-e NODE_ENV=production` is not optional: the dev image sets `NODE_ENV=development`, and a build
+  run that way fails while prerendering `/404`, with a misleading
+  `<Html> should not be imported outside of pages/_document` error.
 
 ## Production mode
 
@@ -232,6 +250,54 @@ The two modes build different image tags (`quize-web:dev` and `quize-web:prod`).
 with a single shared tag the last build wins, and `docker compose up` would quietly serve the
 production image as the dev service — which then fails because the production image runs as a
 different uid than the dependency volume it is handed.
+
+### Deploying to Vercel (or any platform)
+
+Nothing here is Docker-specific: it is a plain Next.js 15 app, so a platform builds the same source
+and the Docker files are simply ignored. Three differences matter:
+
+1. **Environment variables are set on the platform.** `.env` is git-ignored, so a deploy never sees
+   it. The app needs two:
+
+   | Variable | What it is |
+   |---|---|
+   | `MONGODB_URI` | the Atlas connection string, **including the database name** |
+   | `ADMIN_TOKEN` | a long random string that unlocks the builder |
+   | `BUILDER_OPEN` | optional; `true` removes the builder's token check, so anyone can edit the quizzes (showcase only) |
+
+2. **Atlas has to accept connections from the platform.** Serverless functions egress from changing
+   IP addresses, so the Network Access allowlist needs `0.0.0.0/0`. That is only defensible because
+   the connection is authenticated and encrypted — pair it with a least-privilege database user,
+   not the cluster's admin account.
+
+3. **TLS termination happens in front of the app.** No configuration is needed: the builder cookie
+   is marked `Secure` automatically when requests arrive over HTTPS.
+
+```bash
+npx vercel link                                  # or import the repo at vercel.com/new
+npx vercel env add MONGODB_URI production        # prompts, so the value stays out of your history
+npx vercel env add ADMIN_TOKEN production
+npx vercel deploy --prod
+```
+
+Then check it the way the healthcheck does — `/api/health` answers 200 only when the app and its
+database connection are both working:
+
+```bash
+curl -s https://your-deployment.vercel.app/api/health      # {"ok":true,"database":"up"}
+BASE_URL=https://your-deployment.vercel.app ADMIN_TOKEN=... node scripts/smoke.mjs
+```
+
+Details worth knowing:
+
+- `.next/standalone` is produced only when `NEXT_STANDALONE=1`, which the Dockerfile's build stage
+  sets, so platform builds use their own output layout instead.
+- Mongoose is cached on `globalThis` (`lib/db.ts`), which is what stops serverless invocations from
+  opening a fresh connection per request.
+- Only `app/api/graphql/route.ts` (`runtime = 'nodejs'`) touches the database, and
+  `app/q/[id]/page.tsx` is `force-dynamic`, so an edited quiz shows up immediately.
+- Pick the region closest to your Atlas cluster: every query crosses that gap.
+- `.vercelignore` keeps `.env`, `node_modules`, `.next` and the Docker files out of a CLI upload.
 
 ### Backups
 
@@ -338,6 +404,10 @@ What is in place:
 
 - The builder and every `admin*` operation require `ADMIN_TOKEN`, compared in constant time.
   If the variable is unset the builder fails **closed** rather than opening up.
+- `BUILDER_OPEN=true` deliberately replaces that check with nothing, for a showcase deployment:
+  anyone who reaches `/builder` or the admin operations can create, edit and delete quizzes. It is
+  off unless you set it, and it is the one switch that makes the application writeable by
+  strangers — take a `mongodump` before turning it on.
 - The admin token is stored in an httpOnly, `SameSite=strict` cookie; the browser cannot read it
   and another site cannot replay it.
 - Answer keys are absent from the public schema, from the rendered HTML and from the API.
@@ -348,9 +418,9 @@ What is in place:
 What is *not* in place — read this before putting it on the internet:
 
 - **No per-user accounts.** One shared admin token. Anyone with it can edit every quiz.
-- **No HTTPS.** Put it behind a TLS-terminating reverse proxy (Caddy, nginx, Traefik) and then
-  add `secure: true` to the cookie in `app/api/admin/session/route.ts`. Without HTTPS that cookie
-  is sent in clear text on the local network.
+- **No TLS of its own.** Terminate HTTPS in front of it (Caddy, nginx, Traefik, or the platform) —
+  a plain-http deployment sends the builder cookie in clear text. The cookie picks up `Secure`
+  automatically once requests arrive over HTTPS, so there is nothing to configure.
 - **No rate limiting.** The public `startQuiz` / `submitQuiz` mutations can be called by anyone
   who has a quiz link, which is also how the analytics counters can be inflated.
 - **No password-protected quizzes and no per-quiz access control.** Expiry is supported; password

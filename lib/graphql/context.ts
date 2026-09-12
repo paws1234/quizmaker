@@ -4,14 +4,27 @@ import { GraphQLError } from 'graphql';
 /**
  * Builder authentication.
  *
- * One shared token (`ADMIN_TOKEN`) unlocks the builder and every admin
- * operation. The browser receives it once at /builder, and it travels back as
- * an httpOnly, SameSite=strict cookie; scripts and other origins cannot read or
- * replay it. If the token is not configured the builder fails closed instead of
- * silently opening up.
+ * Two modes, chosen by environment:
+ *
+ * - **Token (default).** One shared token (`ADMIN_TOKEN`) unlocks the builder and
+ *   every admin operation. The browser receives it once at /builder, and it
+ *   travels back as an httpOnly, SameSite=strict cookie; scripts and other
+ *   origins cannot read or replay it. If the token is not configured the builder
+ *   fails closed instead of silently opening up.
+ * - **Open (`BUILDER_OPEN=true`).** No check at all: anyone who reaches /builder
+ *   or an admin operation can create, edit and delete quizzes. For showcase
+ *   deployments where the data is disposable — see the README.
  */
 
 export const ADMIN_COOKIE = 'quiz_admin';
+
+/**
+ * `BUILDER_OPEN=true` deliberately removes the check. Everything public on the
+ * internet can then edit the quizzes, so it is off unless explicitly set.
+ */
+export function isBuilderOpen(): boolean {
+    return process.env.BUILDER_OPEN === 'true';
+}
 
 export type GraphQLContext = {
   isAdmin: boolean;
@@ -55,11 +68,15 @@ export function readCookie(request: Request, name: string): string | null {
 }
 
 export function authenticate(request: Request): GraphQLContext {
+    if (isBuilderOpen()) return { isAdmin: true };
+
   const token = request.headers.get('x-admin-token') ?? readCookie(request, ADMIN_COOKIE);
   return { isAdmin: isAdminToken(token) };
 }
 
 export function sessionFor(request: Request): Session {
+    if (isBuilderOpen()) return { isAdmin: true, configured: true };
+
   const token = request.headers.get('x-admin-token') ?? readCookie(request, ADMIN_COOKIE);
   return { isAdmin: isAdminToken(token), configured: expectedToken() !== null };
 }
