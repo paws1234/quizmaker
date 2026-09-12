@@ -1,0 +1,30 @@
+{
+  "name": "quize",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless quiz maker: Next.js player + builder, GraphQL API, MongoDB. Runs entirely in Docker.",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "graphql": "^17.0.2",
+    "graphql-yoga": "^5.23.0",
+    "mongoose": "^9.10.0",
+    "nanoid": "^6.0.1",
+    "next": "15.5.25",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3"
+  }
+}

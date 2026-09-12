@@ -1,0 +1,82 @@
+# Everything this project needs runs here: MongoDB, the GraphQL API and the
+# Next.js frontend. No cloud accounts, no local Node install.
+#
+#   docker compose up --build     start the stack   -> http://localhost:3000
+#   docker compose logs -f web    follow app logs
+#   docker compose down           stop (data survives in the mongo-data volume)
+#
+name: quize
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-quiz}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-quiz}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      # Published on the loopback interface only, so the database is never
+      # reachable from the network. Override MONGO_BIND=0.0.0.0 if you need that.
+      - "${MONGO_BIND:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 }).ok' | grep -q 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    # A distinct tag from the production image (quize-web:prod): sharing one tag
+    # means the first mode you build wins and `docker compose up` silently runs
+    # the other mode's image.
+    image: quize-web:dev
+    build:
+      context: .
+      target: dev
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      # Built from the same variables mongo uses, so the two can never drift.
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-quiz}:${MONGO_ROOT_PASSWORD:-quiz}@mongo:27017/${MONGO_DB:-quiz}?authSource=admin
+      # Token that unlocks the builder. Change it in .env before exposing this.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
+    command: sh -c "npm install --no-audit --no-fund && npm run dev"
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    volumes:
+      # Source is mounted so edits on the host reload instantly (fast refresh).
+      - .:/app
+      # Dependencies and build output stay inside named volumes: no host clutter,
+      # no stale .next, and the container's node_modules never shadows the host's.
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+volumes:
+  mongo-data:
+  web_node_modules:
+  web_next:

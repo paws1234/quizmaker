@@ -1,0 +1,14 @@
+# Never ship these into the image: the container installs its own deps and the
+# source is bind-mounted for dev.
+node_modules
+.next
+.git
+.gitignore
+
+# Secrets stay on the host; compose injects them as environment variables.
+.env
+.env.local
+.env.*.local
+
+npm-debug.log*
+*.tsbuildinfo

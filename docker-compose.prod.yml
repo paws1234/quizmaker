@@ -1,0 +1,31 @@
+# Production overlay: same stack, but the app is served from a compiled
+# standalone build instead of the dev server, and nothing is bind-mounted.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+#
+# The mongo-data volume is shared with the dev stack, so quizzes created while
+# developing are still there in "production".
+name: quize
+
+services:
+  web:
+    image: quize-web:prod
+    build:
+      context: .
+      target: runner
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    restart: unless-stopped
+    # No dev command and no bind mounts: the image contains everything.
+    command: !reset null
+    volumes: !reset []
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-quiz}:${MONGO_ROOT_PASSWORD:-quiz}@mongo:27017/${MONGO_DB:-quiz}?authSource=admin
+      # Fails fast instead of silently shipping the dev token.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env before a production run}
+    ports: !override
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
